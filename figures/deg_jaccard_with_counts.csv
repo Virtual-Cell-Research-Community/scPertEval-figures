@@ -1,4 +1,16 @@
 dataset,criterion,median_set_size
+wessels23,"t-test, |t| > 2",4611
+wessels23,"t-test, |t| > 4",1958
+wessels23,"t-test, |t| > 8",647
+wessels23,"t-test, padj < 0.1",3937
+wessels23,"t-test, padj < 0.05",3383
+wessels23,"t-test, padj < 0.01",2649
+wessels23,"MWU, |δ| > 0.15",476
+wessels23,"MWU, |δ| > 0.33",29
+wessels23,"MWU, |δ| > 0.47",5
+wessels23,"MWU, padj < 0.1",323
+wessels23,"MWU, padj < 0.05",248
+wessels23,"MWU, padj < 0.01",144
 replogle22k562,"t-test, |t| > 2",827
 replogle22k562,"t-test, |t| > 4",77
 replogle22k562,"t-test, |t| > 8",8
