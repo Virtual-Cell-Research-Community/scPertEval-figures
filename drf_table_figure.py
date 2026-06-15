@@ -1,4 +1,4 @@
-"""DRF table figure from EPPS outputs, matching the DRF preprint figure's columns.
+"""DRF table figure from scPertEval outputs, matching the DRF preprint figure's columns.
 
 Reads the latest per-dataset DRF CSV in ``drf_outputs/``, aggregates the
 per-perturbation DRF to mean and median per protocol, and renders a
@@ -40,7 +40,7 @@ EM = "—"
 APM, CTM, APC = "All-pert.\n(mean)", "Control\n(mean)", "All-pert.\n{8192 cells}"
 # Columns mirror the DRF preprint figure exactly. Each row:
 # (protocol, Base Metric, Reference Centering, Representation, Positive Control,
-#  Negative Control, Feature Space, Weight Exponent). Protocol names are the current EPPS
+#  Negative Control, Feature Space, Weight Exponent). Protocol names are the current scPertEval
 # names at their figure defaults (k=50 / padj=0.05).
 ROWS = [
     ("pearson", "Pearson", EM, "Pseudobulk", "Interpolated TD", APM, EM, EM),
@@ -76,7 +76,7 @@ def latest_drf(ds: str):
 
 
 def aggregate() -> dict:
-    """{dataset: {protocol: (mean_drf, median_drf)}}, mirroring EPPS's drf calibrator."""
+    """{dataset: {protocol: (mean_drf, median_drf)}}, mirroring scPertEval's drf calibrator."""
     out = {}
     for ds, _ in DATASETS:
         p = latest_drf(ds)

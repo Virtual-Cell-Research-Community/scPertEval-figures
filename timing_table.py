@@ -1,4 +1,4 @@
-"""Per-metric wall-clock timing table from EPPS ``--profile`` outputs.
+"""Per-metric wall-clock timing table from scPertEval ``--profile`` outputs.
 
 Reads the latest per-dataset timing CSV in ``drf_outputs/`` and renders a table
 with the same metric rows/order as the DRF table figure, one wall-clock column per

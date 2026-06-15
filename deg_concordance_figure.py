@@ -1,4 +1,4 @@
-"""DEG-method concordance figure from EPPS-recomputed DE (self-contained).
+"""DEG-method concordance figure from scPertEval-recomputed DE (self-contained).
 
 Identical to ``deg_jaccard_figure.py`` EXCEPT the top band: instead of per-
 perturbation Spearman histograms, this renders 4 concordance-at-k curves (one
@@ -8,6 +8,9 @@ the median DEG count table (bottom) are reused verbatim by importing from
 ``deg_jaccard_figure``.
 
     python deg_concordance_figure.py    # standalone: auto-downloads DE from the public bucket
+
+``render()`` is parameterised by the t-test backend; ``deg_concordance_overestim_figure.py``
+reuses it against the ``t-test_overestim_var`` DE in ``gs://scperteval/de_outputs_overestim/``.
 """
 from __future__ import annotations
 
@@ -17,13 +20,15 @@ import pandas as pd
 from deg_jaccard_figure import (
     build_criteria,
     compute_dataset,
-    EPPSDESource,
+    DESource,
     _ensure_de,
     _heatmap,
     _count_table,
     DATASETS,
+    DE_CACHE,
     DE_DIR,
     FIG_DIR,
+    GCS_DE_PREFIX,
     latest_de,
     TTEST_STAT_THR,
     MWU_CLIFF_THR,
@@ -149,7 +154,7 @@ def _concordance(ax, curve, dataset, show_y):
 # Figure (mirrors deg_jaccard_figure.plot_figure; only top row + top title differ)
 # --------------------------------------------------------------------------- #
 
-def plot_figure(results, curves, labels, out_path):
+def plot_figure(results, curves, labels, out_path, suptitle=CONCORDANCE_SUPTITLE):
     """Three-band figure: concordance curves (top), 12x12 heatmaps (middle), set-size table (bottom)."""
     import matplotlib
 
@@ -214,7 +219,7 @@ def plot_figure(results, curves, labels, out_path):
 
     title_kw = dict(ha="center", fontsize=14, fontweight="bold")
     sub_kw = dict(ha="center", va="top", fontsize=9)
-    fig.text(xc, hist_row.y1 + 0.045, CONCORDANCE_SUPTITLE, va="bottom", **title_kw)
+    fig.text(xc, hist_row.y1 + 0.045, suptitle, va="bottom", **title_kw)
     fig.text(xc, heat_row.y1 + 0.022, "Mean Jaccard", va="bottom", **title_kw)
     fig.text(xc, heat_row.y1 + 0.010, "reference: all-perturbed 8192-cell pool", **sub_kw)
     fig.text(xc, table_top + 0.022, "Median number of DEGs selected per criterion",
@@ -230,17 +235,25 @@ def plot_figure(results, curves, labels, out_path):
 # main
 # --------------------------------------------------------------------------- #
 
-def main() -> None:
+def render(ttest_key="t-test", de_prefix=GCS_DE_PREFIX, cache_dir=DE_CACHE,
+           local_dirs=None, ttest_label="t-test", suptitle=CONCORDANCE_SUPTITLE,
+           out_stem="deg_concordance") -> None:
+    """Render the concordance composite for a chosen t-test backend.
+
+    Defaults reproduce the standard (``t-test`` vs MWU) figure; the overestim variant
+    overrides ``ttest_key``/``de_prefix``/``cache_dir`` (see
+    ``deg_concordance_overestim_figure.py``).
+    """
     FIG_DIR.mkdir(parents=True, exist_ok=True)
-    criteria = build_criteria(TTEST_STAT_THR, MWU_CLIFF_THR, PADJ_THR)
+    criteria = build_criteria(TTEST_STAT_THR, MWU_CLIFF_THR, PADJ_THR, ttest_label=ttest_label)
     labels = [c[0] for c in criteria]
     results, curves = [], []
     for ds in DATASETS:
-        h5 = _ensure_de(ds)
+        h5 = _ensure_de(ds, cache_dir=cache_dir, de_prefix=de_prefix, local_dirs=local_dirs)
         if h5 is None:
             print(f"[SKIP] {ds}: no DE available (local cache or public bucket)")
             continue
-        comp = EPPSDESource(h5, ds)
+        comp = DESource(h5, ds, ttest_key=ttest_key)
         res = compute_dataset(comp, criteria)
         if res["n_perturbations"] == 0:
             print(f"[SKIP] {ds}: no perturbations")
@@ -253,15 +266,19 @@ def main() -> None:
         curves.append(curve)
         print(f"[OK]   {ds}: n_pert={res['n_perturbations']} median_aucc={curve['median_aucc']:.3f}")
     if not results:
-        print("No datasets available; run `epps de` first.")
+        print("No datasets available; run `scperteval de` first.")
         return
-    plot_figure(results, curves, labels, _D.FIG_DIR / "deg_concordance.png")
+    plot_figure(results, curves, labels, FIG_DIR / f"{out_stem}.png", suptitle=suptitle)
     rows = [(c["dataset"], int(k), float(m), float(lo), float(hi))
             for c in curves
             for k, m, lo, hi in zip(c["grid"], c["median"], c["p25"], c["p75"])]
     pd.DataFrame(rows, columns=["dataset", "k", "median_conc", "p25", "p75"]).to_csv(
-        _D.FIG_DIR / "deg_concordance.csv", index=False)
-    print(f"wrote deg_concordance.{{png,csv}} ({len(results)} datasets)")
+        FIG_DIR / f"{out_stem}.csv", index=False)
+    print(f"wrote {out_stem}.{{png,csv}} ({len(results)} datasets)")
+
+
+def main() -> None:
+    render()
 
 
 if __name__ == "__main__":

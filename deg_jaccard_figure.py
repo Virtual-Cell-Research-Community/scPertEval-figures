@@ -1,6 +1,6 @@
-"""DEG-method Jaccard figure from EPPS-recomputed DE (self-contained).
+"""DEG-method Jaccard figure from scPertEval-recomputed DE (self-contained).
 
-Consumes the per-gene DE HDF5 files written by ``epps de`` (t-test + MWU, GT
+Consumes the per-gene DE HDF5 files written by ``scperteval de`` (t-test + MWU, GT
 first-half vs the all-perturbed pool) and renders the composite figure: per-
 perturbation Spearman histograms (top), 12x12 mean-Jaccard heatmaps (middle),
 and a median DEG set-size table (bottom). All criteria / Jaccard / plotting code
@@ -11,6 +11,10 @@ is vendored here -- no external project dependency.
 Standalone usage requires no auth: ``_ensure_de`` lists/downloads the per-dataset DE
 HDF5s from the public bucket ``gs://scperteval/de_outputs/`` over plain HTTPS and caches
 them in ``de_cache/`` next to this script.
+
+``render()`` is parameterised by the t-test backend, so the companion
+``deg_jaccard_overestim_figure.py`` reuses everything here against the
+``t-test_overestim_var`` DE in ``gs://scperteval/de_outputs_overestim/``.
 """
 from __future__ import annotations
 
@@ -40,25 +44,31 @@ DATASETS = ["wessels23", "replogle22k562", "nadig25hepg2", "arch1"]
 # Public-bucket DE loader (no gcloud / no auth)
 # --------------------------------------------------------------------------- #
 
-def _ensure_de(dataset: str, cache_dir: Path = DE_CACHE):
+def _ensure_de(dataset: str, cache_dir: Path = DE_CACHE,
+               de_prefix: str = GCS_DE_PREFIX, local_dirs=None):
     """Return a local path to ``<dataset>*__de.h5``, downloading it if needed.
 
-    If a matching file is already cached locally (in ``cache_dir`` or the legacy
-    ``de_outputs/`` dir), reuse it. Otherwise list the public bucket via the GCS JSON
-    API, find the ``*__de.h5`` object for ``dataset``, and download it over HTTPS.
-    Returns ``None`` if the dataset is not present in the bucket.
+    If a matching file is already cached locally (in ``local_dirs``, default
+    ``cache_dir`` + the legacy ``de_outputs/`` dir), reuse it. Otherwise list the public
+    bucket under ``de_prefix`` via the GCS JSON API, find the ``*__de.h5`` object for
+    ``dataset``, and download it over HTTPS. Returns ``None`` if the dataset is absent.
+
+    ``de_prefix`` selects the bucket folder (``de_outputs`` for the standard t-test,
+    ``de_outputs_overestim`` for the overestim-variant DE); pair it with a dedicated
+    ``cache_dir``/``local_dirs`` so the two never collide (same file-naming scheme).
     """
     cache_dir = Path(cache_dir)
     # 1. already cached?
-    for d in (cache_dir, DE_DIR):
-        hits = sorted(glob.glob(str(d / f"{dataset}*__de.h5")))
+    search = list(local_dirs) if local_dirs is not None else [cache_dir, DE_DIR]
+    for d in search:
+        hits = sorted(glob.glob(str(Path(d) / f"{dataset}*__de.h5")))
         if hits:
             return Path(hits[-1])
 
     # 2. list the public bucket for this dataset's DE object
     list_url = (
         f"https://storage.googleapis.com/storage/v1/b/{GCS_BUCKET}/o"
-        f"?prefix={urllib.parse.quote(f'{GCS_DE_PREFIX}/{dataset}')}"
+        f"?prefix={urllib.parse.quote(f'{de_prefix}/{dataset}')}"
     )
     try:
         with urllib.request.urlopen(list_url, timeout=60) as resp:
@@ -68,7 +78,7 @@ def _ensure_de(dataset: str, cache_dir: Path = DE_CACHE):
         return None
     names = [o["name"] for o in listing.get("items", []) if o["name"].endswith("__de.h5")]
     if not names:
-        print(f"[INFO] {dataset}: not present in gs://{GCS_BUCKET}/{GCS_DE_PREFIX}/")
+        print(f"[INFO] {dataset}: not present in gs://{GCS_BUCKET}/{de_prefix}/")
         return None
     obj_name = sorted(names)[-1]
 
@@ -100,13 +110,16 @@ SUPTITLE = "corr(-log10 p_adj t-test, -log10 p_adj MWU)"
 # Criteria
 # --------------------------------------------------------------------------- #
 
-def build_criteria(ttest_stat_thr, mwu_cliff_thr, padj_thr):
-    """Ordered (label, method, kind, threshold); method in {ttest,mwu}, kind in {stat,padj}."""
+def build_criteria(ttest_stat_thr, mwu_cliff_thr, padj_thr, ttest_label="t-test"):
+    """Ordered (label, method, kind, threshold); method in {ttest,mwu}, kind in {stat,padj}.
+
+    ``ttest_label`` names the t-test backend in the row labels (e.g. ``t-test`` or
+    ``t-test_ov`` for the overestim variant)."""
     criteria = []
     for thr in ttest_stat_thr:
-        criteria.append((f"t-test, |t| > {thr:g}", "ttest", "stat", thr))
+        criteria.append((f"{ttest_label}, |t| > {thr:g}", "ttest", "stat", thr))
     for thr in padj_thr:
-        criteria.append((f"t-test, padj < {thr:g}", "ttest", "padj", thr))
+        criteria.append((f"{ttest_label}, padj < {thr:g}", "ttest", "padj", thr))
     for thr in mwu_cliff_thr:
         criteria.append((f"MWU, |δ| > {thr:g}", "mwu", "stat", thr))
     for thr in padj_thr:
@@ -239,7 +252,7 @@ def _count_table(ax, labels, datasets, size_matrix):
     return table
 
 
-def plot_figure(results, labels, out_path):
+def plot_figure(results, labels, out_path, suptitle=SUPTITLE):
     """Three-band figure: histograms (top), 12x12 heatmaps (middle), set-size table (bottom)."""
     import matplotlib
 
@@ -311,7 +324,7 @@ def plot_figure(results, labels, out_path):
     # title_block just above the plots, so the white gap above every title is equal.
     title_kw = dict(ha="center", fontsize=14, fontweight="bold")
     sub_kw = dict(ha="center", va="top", fontsize=9)
-    fig.text(xc, hist_row.y1 + 0.045, SUPTITLE, va="bottom", **title_kw)                  # histograms
+    fig.text(xc, hist_row.y1 + 0.045, suptitle, va="bottom", **title_kw)                  # histograms
     fig.text(xc, heat_row.y1 + 0.022, "Mean Jaccard", va="bottom", **title_kw)           # heatmaps
     fig.text(xc, heat_row.y1 + 0.010, "reference: all-perturbed 8192-cell pool", **sub_kw)
     fig.text(xc, table_top + 0.022, "Median number of DEGs selected per criterion",
@@ -324,18 +337,23 @@ def plot_figure(results, labels, out_path):
 
 
 # --------------------------------------------------------------------------- #
-# EPPS DE source + main
+# scPertEval DE source + render/main
 # --------------------------------------------------------------------------- #
 
-class EPPSDESource:
-    """Reads an ``epps de`` HDF5 file, yielding the {ttest,mwu}_{stat,padj} arrays per pert."""
+class DESource:
+    """Reads a ``scperteval de`` HDF5 file, yielding the {ttest,mwu}_{stat,padj} arrays per pert.
 
-    def __init__(self, h5path, dataset: str):
+    ``ttest_key`` selects which t-test group to read for the "ttest" channel:
+    ``t-test`` (default) or ``t-test_overestim_var`` for the overestim variant. The MWU
+    channel always reads the ``MWU`` group.
+    """
+
+    def __init__(self, h5path, dataset: str, ttest_key: str = "t-test"):
         self.dataset_name = dataset
         self.reference = "all_perturbed_8192"
         with h5py.File(str(h5path), "r") as f:
             self.perturbations = [p.decode() for p in f["perturbations"][:]]
-            self._ts, self._tp = f["t-test/statistic"][:], f["t-test/pvalue_adj"][:]
+            self._ts, self._tp = f[f"{ttest_key}/statistic"][:], f[f"{ttest_key}/pvalue_adj"][:]
             self._ms, self._mp = f["MWU/statistic"][:], f["MWU/pvalue_adj"][:]
         self._idx = {p: i for i, p in enumerate(self.perturbations)}
 
@@ -352,31 +370,43 @@ def latest_de(ds: str):
     return cands[-1] if cands else None
 
 
-def main() -> None:
+def render(ttest_key="t-test", de_prefix=GCS_DE_PREFIX, cache_dir=DE_CACHE,
+           local_dirs=None, ttest_label="t-test", suptitle=SUPTITLE,
+           out_stem="deg_jaccard_with_counts") -> None:
+    """Render the Jaccard composite for a chosen t-test backend.
+
+    Defaults reproduce the standard (``t-test`` vs MWU) figure. The overestim variant
+    passes ``ttest_key='t-test_overestim_var'``, ``de_prefix='de_outputs_overestim'`` and a
+    dedicated ``cache_dir``/``local_dirs`` (see ``deg_jaccard_overestim_figure.py``).
+    """
     FIG_DIR.mkdir(parents=True, exist_ok=True)
-    criteria = build_criteria(TTEST_STAT_THR, MWU_CLIFF_THR, PADJ_THR)
+    criteria = build_criteria(TTEST_STAT_THR, MWU_CLIFF_THR, PADJ_THR, ttest_label=ttest_label)
     labels = [c[0] for c in criteria]
     results = []
     for ds in DATASETS:
-        h5 = _ensure_de(ds)
+        h5 = _ensure_de(ds, cache_dir=cache_dir, de_prefix=de_prefix, local_dirs=local_dirs)
         if h5 is None:
             print(f"[SKIP] {ds}: no DE available (local cache or public bucket)")
             continue
-        res = compute_dataset(EPPSDESource(h5, ds), criteria)
+        res = compute_dataset(DESource(h5, ds, ttest_key=ttest_key), criteria)
         if res["n_perturbations"] == 0:
             print(f"[SKIP] {ds}: no perturbations")
             continue
         results.append(res)
         print(f"[OK]   {ds}: n_pert={res['n_perturbations']}")
     if not results:
-        print("No datasets available; run `epps de` first.")
+        print("No datasets available; run `scperteval de` first.")
         return
-    plot_figure(results, labels, FIG_DIR / "deg_jaccard_with_counts.png")
+    plot_figure(results, labels, FIG_DIR / f"{out_stem}.png", suptitle=suptitle)
     rows = [(r["dataset"], lab, int(round(sz)) if np.isfinite(sz) else "")
             for r in results for lab, sz in zip(labels, r["median_sizes"])]
     pd.DataFrame(rows, columns=["dataset", "criterion", "median_set_size"]).to_csv(
-        FIG_DIR / "deg_jaccard_with_counts.csv", index=False)
-    print(f"wrote deg_jaccard_with_counts.{{png,csv}} ({len(results)} datasets)")
+        FIG_DIR / f"{out_stem}.csv", index=False)
+    print(f"wrote {out_stem}.{{png,csv}} ({len(results)} datasets)")
+
+
+def main() -> None:
+    render()
 
 
 if __name__ == "__main__":

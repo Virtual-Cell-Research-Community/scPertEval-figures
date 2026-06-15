@@ -11,6 +11,10 @@ Reproduction of the figures from the **scPertEval** preprint:
   (`deg_jaccard_figure.py` → `deg_jaccard_with_counts.png`).
 - **DEG-concordance composite** — concordance@k (Squair AUCC) curves over the same heatmaps
   and count table (`deg_concordance_figure.py` → `deg_concordance.png`).
+- **Overestim DEG variants** — the same two DEG composites, but comparing scanpy's
+  conservative `t-test_overestim_var` against MWU instead of the standard Welch t-test
+  (`deg_jaccard_overestim_figure.py`, `deg_concordance_overestim_figure.py` →
+  `deg_jaccard_overestim_with_counts.png`, `deg_concordance_overestim.png`). See section (C).
 
 The scPertEval code lives in a separate repo:
 <https://github.com/Virtual-Cell-Research-Community/scPertEval>.
@@ -48,6 +52,31 @@ in `figures/`. Datasets not yet present in the bucket are skipped gracefully.
 
 Requires Python with `h5py`, `numpy`, `pandas`, `scipy`, and `matplotlib` (all installed by the
 scPertEval install in the notebook path).
+
+## (C) DEG figures with the conservative t-test (`t-test_overestim_var` vs MWU)
+
+scanpy's conservative-variance t-test (`t-test_overestim_var`) is a selectable scPertEval DE
+backend, and the two DEG composites have **overestim variants** that compare it against MWU
+instead of the standard Welch t-test:
+
+```bash
+python deg_jaccard_overestim_figure.py        # -> figures/deg_jaccard_overestim_with_counts.png
+python deg_concordance_overestim_figure.py    # -> figures/deg_concordance_overestim.png
+```
+
+These auto-download the `t-test_overestim_var,MWU` DE HDF5s from the separate public folder
+`gs://scperteval/de_outputs_overestim/` (cached in `de_cache_overestim/`), so they never
+collide with the standard-t-test DE in `de_outputs/`. Criteria, heatmaps, and the count table
+are identical to the standard figures; only the t-test backend differs (its rows are tagged
+`t-test_ov`). The overestim t-test is deliberately more conservative — its `|t|` is smaller —
+so the `|t|`-threshold rows select fewer genes than the standard variant.
+
+To regenerate the underlying DE from scratch (then upload to your own bucket folder):
+
+```bash
+scperteval de <dataset>_processed_complete.h5ad --methods t-test_overestim_var,MWU \
+    --subsample 8192 --seed 42
+```
 
 ## Why is the wessels23 DEG concordance so low?
 
