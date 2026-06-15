@@ -1,0 +1,45 @@
+Base Metric,Reference Centering,Representation,Positive Control,Negative Control,Feature Space,Weight Exponent,Wessels23,Replogle22 RPE1,Replogle22 K562,Nadig25 Jurkat,Nadig25 Hepg2,ArcH1,Kaden25 RPE1
+Pearson,—,Pseudobulk,Interpolated TD,"All-pert.
+(mean)",—,—,+0.33,+0.17,+0.11,+0.04,+0.08,+0.61,-0.20
+Pearson,Ctrl,Pseudobulk,Interpolated TD,"All-pert.
+(mean)",—,—,+0.39,+0.18,+0.22,+0.15,+0.16,+0.70,+0.02
+Pearson,Pert,Pseudobulk,Interpolated TD,"Control
+(mean)",—,—,+0.49,+0.07,+0.17,+0.14,+0.07,+0.56,+0.10
+Pearson,Pert,Pseudobulk,Interpolated TD,"Control
+(mean)",Sig. DEGs,—,+0.74,+0.37,+0.26,+0.31,+0.15,+0.83,+0.42
+Pearson,Pert,Pseudobulk,Interpolated TD,"Control
+(mean)",Top-50 DEGs,—,+0.24,+0.36,+0.30,+0.33,+0.26,+0.96,+0.14
+MSE,—,Pseudobulk,Interpolated TD,"All-pert.
+(mean)",—,—,+0.33,+0.17,+0.12,+0.05,+0.08,+0.61,-0.19
+MSE,—,Pseudobulk,Interpolated TD,"All-pert.
+(mean)",Sig. DEGs,—,+0.68,+0.54,+0.49,+0.46,+0.41,+0.84,+0.24
+MSE,—,Pseudobulk,Interpolated TD,"All-pert.
+(mean)",Top-50 DEGs,—,+0.51,+0.54,+0.53,+0.47,+0.38,+0.97,+0.20
+WMSE,—,Pseudobulk,Interpolated TD,"All-pert.
+(mean)",—,1.0,+0.66,+0.41,+0.31,+0.26,+0.27,+0.93,+0.02
+WMSE,—,Pseudobulk,Interpolated TD,"All-pert.
+(mean)",—,2.0,+0.77,+0.54,+0.47,+0.42,+0.39,+0.99,+0.15
+WMSE,—,Pseudobulk,Interpolated TD,"All-pert.
+(mean)",—,4.0,+0.75,+0.58,+0.56,+0.49,+0.40,+0.99,+0.28
+TransposedRank,—,Pseudobulk,Interpolated TD,"All-pert.
+(mean)",—,—,+0.93,+0.67,+0.48,+0.46,+0.50,+0.96,+0.30
+Rank,—,Pseudobulk,Interpolated TD,"All-pert.
+(mean)",—,—,+0.97,+0.80,+0.75,+0.69,+0.69,+0.99,+0.30
+DE Overlap @ 50,—,Single-cell,Technical duplicate,"All-pert.
+{8192 cells}",—,—,+0.08,+0.11,+0.14,+0.10,+0.07,+0.51,+0.05
+DE AUPRC,—,Single-cell,Technical duplicate,"All-pert.
+{8192 cells}",—,—,+0.22,+0.03,+0.09,+0.06,+0.04,+0.33,+0.22
+DE AUROC,—,Single-cell,Technical duplicate,"All-pert.
+{8192 cells}",—,—,+0.42,+0.10,+0.11,+0.17,+0.13,+0.42,+0.40
+MMD,—,Single-cell,Technical duplicate,"All-pert.
+{8192 cells}",Top-50 DEGs,—,-0.11,+0.18,+0.44,+0.12,-0.30,+0.97,+0.38
+MMD,—,Single-cell,Technical duplicate,"All-pert.
+{8192 cells}",PCA-50,—,+0.95,+0.89,+0.90,+0.83,+0.82,+0.98,+0.66
+ED,—,Single-cell,Technical duplicate,"All-pert.
+{8192 cells}",Top-50 DEGs,—,+0.51,+0.61,+0.63,+0.49,+0.35,+0.98,+0.18
+ED,—,Single-cell,Technical duplicate,"All-pert.
+{8192 cells}",PCA-50,—,+0.96,+0.90,+0.90,+0.84,+0.84,+0.98,+0.66
+$W_2$ (Sinkhorn),—,Single-cell,Technical duplicate,"All-pert.
+{8192 cells}",Top-50 DEGs,—,+0.32,+0.25,+0.16,+0.14,+0.16,+0.40,+0.05
+$W_2$ (Sinkhorn),—,Single-cell,Technical duplicate,"All-pert.
+{8192 cells}",PCA-50,—,+0.16,+0.17,+0.11,+0.07,+0.11,+0.11,-0.03
