@@ -1,6 +1,7 @@
 """Per-metric wall-clock timing table from scPertEval ``--profile`` outputs.
 
-Reads the latest per-dataset timing CSV in ``drf_outputs/`` and renders a table
+Reads the latest per-dataset timing CSV in ``drf_outputs/`` (as written by
+``scperteval calibrate --profile``) and renders a table
 with the same metric rows/order as the DRF table figure, one wall-clock column per
 dataset plus a per-row Total and a per-dataset TOTAL row.
 
@@ -8,7 +9,6 @@ dataset plus a per-row Total and a per-dataset TOTAL row.
 """
 from __future__ import annotations
 
-import glob
 from pathlib import Path
 
 import matplotlib
@@ -19,7 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
-from drf_table_figure import DATASETS, DESC, DRF_DIR, FIG_DIR, ROWS
+from drf_table_figure import DATASETS, DESC, FIG_DIR, ROWS, latest_table
 
 
 def _is_dark(rgba, thresh=0.55):
@@ -29,8 +29,7 @@ def _is_dark(rgba, thresh=0.55):
 
 
 def latest_timing(ds: str):
-    cands = sorted(glob.glob(str(DRF_DIR / f"{ds}*__timing.csv")))
-    return cands[-1] if cands else None
+    return latest_table(f"{ds}*__timing")
 
 
 def collect() -> dict:
@@ -79,6 +78,8 @@ def render(tim: dict, path: Path) -> None:
     def _lognorm(mask):
         v = cell_vals[mask]
         v = v[np.isfinite(v) & (v > 0)]
+        if not v.size:      # no timing tables yet: every cell is "-", so this norm is never applied
+            return LogNorm(vmin=1.0, vmax=10.0)
         return LogNorm(vmin=v.min(), vmax=v.max())
 
     cell_mask = np.zeros_like(cell_vals, dtype=bool)

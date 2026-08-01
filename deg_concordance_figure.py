@@ -26,15 +26,12 @@ from deg_jaccard_figure import (
     _count_table,
     DATASETS,
     DE_CACHE,
-    DE_DIR,
     FIG_DIR,
     GCS_DE_PREFIX,
-    latest_de,
     TTEST_STAT_THR,
     MWU_CLIFF_THR,
     PADJ_THR,
 )
-import deg_jaccard_figure as _D
 
 PADJ_FLOOR = 1e-300
 CONCORDANCE_SUPTITLE = "Concordance@k: t-test vs MWU (Squair AUCC)"
@@ -249,11 +246,12 @@ def render(ttest_key="t-test", de_prefix=GCS_DE_PREFIX, cache_dir=DE_CACHE,
     labels = [c[0] for c in criteria]
     results, curves = [], []
     for ds in DATASETS:
-        h5 = _ensure_de(ds, cache_dir=cache_dir, de_prefix=de_prefix, local_dirs=local_dirs)
-        if h5 is None:
+        sources = _ensure_de(ds, (ttest_key, "MWU"), cache_dir=cache_dir,
+                             de_prefix=de_prefix, local_dirs=local_dirs)
+        if sources is None:
             print(f"[SKIP] {ds}: no DE available (local cache or public bucket)")
             continue
-        comp = DESource(h5, ds, ttest_key=ttest_key)
+        comp = DESource(sources, ds, ttest_key=ttest_key)
         res = compute_dataset(comp, criteria)
         if res["n_perturbations"] == 0:
             print(f"[SKIP] {ds}: no perturbations")
@@ -266,7 +264,8 @@ def render(ttest_key="t-test", de_prefix=GCS_DE_PREFIX, cache_dir=DE_CACHE,
         curves.append(curve)
         print(f"[OK]   {ds}: n_pert={res['n_perturbations']} median_aucc={curve['median_aucc']:.3f}")
     if not results:
-        print("No datasets available; run `scperteval de` first.")
+        print(f"No datasets available; run `scperteval de <dataset>.h5ad --method {ttest_key}` "
+              "and `--method MWU` first.")
         return
     plot_figure(results, curves, labels, FIG_DIR / f"{out_stem}.png", suptitle=suptitle)
     rows = [(c["dataset"], int(k), float(m), float(lo), float(hi))
