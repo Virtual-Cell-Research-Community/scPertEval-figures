@@ -16,8 +16,11 @@ Reproduction of the figures from the **scPertEval** preprint:
   (`deg_jaccard_overestim_figure.py`, `deg_concordance_overestim_figure.py` →
   `deg_jaccard_overestim_with_counts.png`, `deg_concordance_overestim.png`). See section (C).
 
-The scPertEval code lives in a separate repo:
-<https://github.com/Virtual-Cell-Research-Community/scPertEval>.
+These figures are produced with the released **[scPertEval 0.1.0](https://pypi.org/project/scperteval/)**
+(`pip install "scperteval[sinkhorn]==0.1.0"`); the package's code lives in a separate repo:
+<https://github.com/Virtual-Cell-Research-Community/scPertEval>. The `sinkhorn` extra is what
+makes `torch`/`geomloss` available — without it `-p all` skips the two `sinkhorn_w2_*` protocols,
+which are rows of the DRF table.
 
 > **GCP is read-only here.** Every bucket access in this repo is download-only from public
 > buckets; nothing is ever written back to GCS.
@@ -26,15 +29,25 @@ The scPertEval code lives in a separate repo:
 
 Open and run `scperteval-publication-figures.ipynb` end-to-end. It:
 
-1. installs scPertEval from GitHub
-   (`pip install "scperteval @ git+https://github.com/Virtual-Cell-Research-Community/scPertEval.git"`),
+1. installs scPertEval from PyPI (`pip install "scperteval[sinkhorn]==0.1.0"`),
 2. downloads the 7 preprocessed datasets from the public bucket `gs://scperteval/processed`
    (needs the gcloud SDK / `gsutil` on `PATH`),
-3. runs DRF for the 7 datasets and DE export for the 4 DEG datasets,
+3. runs `scperteval calibrate --calibrator drf --profile` for the 7 datasets and
+   `scperteval de` for the 4 DEG datasets,
 4. renders all four figures and displays them.
 
-The dataset download and the scPertEval DRF run are **long-running** (Sinkhorn dominates).
-Everything is deterministic (seed 42, 8192-cell subsample).
+The dataset download and the scPertEval calibration run are **long-running** (Sinkhorn
+dominates). Everything is deterministic (seed 42, 8192-cell subsample).
+
+`drf_table_figure.py` and `timing_table.py` then read the newest
+`drf_outputs/<dataset>*__{drf,timing}.csv`. Their rows are keyed by 0.1.0 protocol names
+(`mse_top_k=50`, `unbiased_mmd_median_pca_k=50`, …), so a table written by a pre-0.1 run — whose
+protocols were named differently — renders as blank rows; re-run the calibration to refresh it:
+
+```bash
+scperteval calibrate <dataset>_processed_complete.h5ad -p all --calibrator drf --profile \
+    --subsample 8192 --seed 42 --out-dir drf_outputs
+```
 
 ## (B) The two DEG figures, standalone
 
@@ -50,6 +63,12 @@ Each script auto-downloads the per-gene DE HDF5s from the public bucket
 URL for the download), caching them in `de_cache/`. No `gsutil`, no credentials. Outputs land
 in `figures/`. Datasets not yet present in the bucket are skipped gracefully.
 
+scPertEval 0.1.0's `scperteval de` writes **one method per HDF5**
+(`<dataset>__<method>__<stamp>__de.h5`), so a figure's two channels normally come from two
+exports; the files currently in the bucket predate that and carry both methods in one file. The
+loader accepts either layout, matching each method to the newest local export that holds it
+before falling back to the bucket.
+
 Requires Python with `h5py`, `numpy`, `pandas`, `scipy`, and `matplotlib` (all installed by the
 scPertEval install in the notebook path).
 
@@ -64,18 +83,22 @@ python deg_jaccard_overestim_figure.py        # -> figures/deg_jaccard_overestim
 python deg_concordance_overestim_figure.py    # -> figures/deg_concordance_overestim.png
 ```
 
-These auto-download the `t-test_overestim_var,MWU` DE HDF5s from the separate public folder
+These auto-download the `t-test_overestim_var` DE HDF5s from the separate public folder
 `gs://scperteval/de_outputs_overestim/` (cached in `de_cache_overestim/`), so they never
-collide with the standard-t-test DE in `de_outputs/`. Criteria, heatmaps, and the count table
-are identical to the standard figures; only the t-test backend differs (its rows are tagged
-`t-test_ov`). The overestim t-test is deliberately more conservative — its `|t|` is smaller —
-so the `|t|`-threshold rows select fewer genes than the standard variant.
+collide with the standard-t-test DE in `de_outputs/`. The MWU channel is the same DE either
+way, so an `MWU` export already in `de_cache/` or `de_outputs/` is reused. Criteria, heatmaps,
+and the count table are identical to the standard figures; only the t-test backend differs (its
+rows are tagged `t-test_ov`). The overestim t-test is deliberately more conservative — its `|t|`
+is smaller — so the `|t|`-threshold rows select fewer genes than the standard variant.
 
-To regenerate the underlying DE from scratch (then upload to your own bucket folder):
+To regenerate the underlying DE from scratch (then upload to your own bucket folder) — one
+method per call, as scPertEval 0.1.0 writes it:
 
 ```bash
-scperteval de <dataset>_processed_complete.h5ad --methods t-test_overestim_var,MWU \
-    --subsample 8192 --seed 42
+scperteval de <dataset>_processed_complete.h5ad --method t-test_overestim_var \
+    --subsample 8192 --seed 42 --out-dir de_cache_overestim
+scperteval de <dataset>_processed_complete.h5ad --method MWU \
+    --subsample 8192 --seed 42 --out-dir de_cache
 ```
 
 ## Why is the wessels23 DEG concordance so low?

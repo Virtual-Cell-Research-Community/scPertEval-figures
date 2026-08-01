@@ -8,6 +8,11 @@ is vendored here -- no external project dependency.
 
     python deg_jaccard_figure.py        # standalone: auto-downloads DE from the public bucket
 
+scPertEval 0.1.0 writes **one method per HDF5** (``scperteval de --method t-test``, then
+``--method MWU``), so a dataset's two channels normally come from two files; the exports
+already in the public bucket predate that and carry both methods in one file. ``_ensure_de``
+accepts either layout.
+
 Standalone usage requires no auth: ``_ensure_de`` lists/downloads the per-dataset DE
 HDF5s from the public bucket ``gs://scperteval/de_outputs/`` over plain HTTPS and caches
 them in ``de_cache/`` next to this script.
@@ -41,31 +46,53 @@ DATASETS = ["wessels23", "replogle22k562", "nadig25hepg2", "arch1"]
 
 
 # --------------------------------------------------------------------------- #
-# Public-bucket DE loader (no gcloud / no auth)
+# DE loader: local ``scperteval de`` exports, else the public bucket (no gcloud / no auth)
 # --------------------------------------------------------------------------- #
 
-def _ensure_de(dataset: str, cache_dir: Path = DE_CACHE,
-               de_prefix: str = GCS_DE_PREFIX, local_dirs=None):
-    """Return a local path to ``<dataset>*__de.h5``, downloading it if needed.
+def _h5_methods(path) -> set:
+    """The DE-method groups an export holds (the groups beside the genes/perturbations arrays)."""
+    try:
+        with h5py.File(str(path), "r") as f:
+            return {k for k in f if isinstance(f[k], h5py.Group)}
+    except OSError as exc:
+        print(f"[WARN] unreadable DE export {path} ({exc})")
+        return set()
 
-    If a matching file is already cached locally (in ``local_dirs``, default
-    ``cache_dir`` + the legacy ``de_outputs/`` dir), reuse it. Otherwise list the public
-    bucket under ``de_prefix`` via the GCS JSON API, find the ``*__de.h5`` object for
-    ``dataset``, and download it over HTTPS. Returns ``None`` if the dataset is absent.
 
-    ``de_prefix`` selects the bucket folder (``de_outputs`` for the standard t-test,
-    ``de_outputs_overestim`` for the overestim-variant DE); pair it with a dedicated
-    ``cache_dir``/``local_dirs`` so the two never collide (same file-naming scheme).
+def _file_method(name) -> str | None:
+    """The method tagged in a ``scperteval de`` filename, or ``None`` for a two-method export.
+
+    scPertEval 0.1.0 names each export ``<stem>__<method>__<stamp>__de.h5``; the files already in
+    the public bucket predate that naming and hold both methods in ``<stem>__<stamp>__de.h5``.
     """
-    cache_dir = Path(cache_dir)
-    # 1. already cached?
-    search = list(local_dirs) if local_dirs is not None else [cache_dir, DE_DIR]
-    for d in search:
-        hits = sorted(glob.glob(str(Path(d) / f"{dataset}*__de.h5")))
-        if hits:
-            return Path(hits[-1])
+    parts = Path(name).name.split("__")
+    return parts[1] if len(parts) == 4 else None
 
-    # 2. list the public bucket for this dataset's DE object
+
+def _local_de(dataset: str, methods, dirs) -> dict:
+    """``{method: path}`` for the methods covered by local ``<dataset>*__de.h5`` exports.
+
+    Directories are searched in order (newest export first within each), so callers can put a
+    dedicated cache ahead of the shared ones; each method takes the first export that holds it.
+    """
+    found: dict[str, Path] = {}
+    for d in dirs:
+        for path in sorted(glob.glob(str(Path(d) / f"{dataset}*__de.h5")), reverse=True):
+            have = _h5_methods(path)
+            for m in methods:
+                if m not in found and m in have:
+                    found[m] = Path(path)
+            if len(found) == len(methods):
+                return found
+    return found
+
+
+def _download_de(dataset: str, methods, cache_dir: Path, de_prefix: str) -> list:
+    """Download the bucket exports covering ``methods`` for ``dataset``; return the local paths.
+
+    Lists the public bucket under ``de_prefix`` via the GCS JSON API and picks, per method, the
+    newest export tagged with it — falling back to the newest untagged (two-method) export.
+    """
     list_url = (
         f"https://storage.googleapis.com/storage/v1/b/{GCS_BUCKET}/o"
         f"?prefix={urllib.parse.quote(f'{de_prefix}/{dataset}')}"
@@ -75,28 +102,65 @@ def _ensure_de(dataset: str, cache_dir: Path = DE_CACHE,
             listing = json.load(resp)
     except Exception as exc:  # network / API failure
         print(f"[WARN] {dataset}: could not list public bucket ({exc})")
-        return None
+        return []
     names = [o["name"] for o in listing.get("items", []) if o["name"].endswith("__de.h5")]
-    if not names:
+    untagged = sorted(n for n in names if _file_method(n) is None)
+    wanted = []
+    for m in methods:
+        tagged = sorted(n for n in names if _file_method(n) == m)
+        pick = tagged[-1] if tagged else (untagged[-1] if untagged else None)
+        if pick is not None and pick not in wanted:
+            wanted.append(pick)
+    if not wanted:
         print(f"[INFO] {dataset}: not present in gs://{GCS_BUCKET}/{de_prefix}/")
-        return None
-    obj_name = sorted(names)[-1]
+        return []
 
-    # 3. download to cache_dir
+    cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    dest = cache_dir / Path(obj_name).name
-    obj_url = f"https://storage.googleapis.com/{GCS_BUCKET}/{urllib.parse.quote(obj_name)}"
-    print(f"[GET]  {dataset}: downloading gs://{GCS_BUCKET}/{obj_name} -> {dest}")
-    tmp = dest.with_suffix(dest.suffix + ".part")
-    try:
-        urllib.request.urlretrieve(obj_url, tmp)
-        tmp.replace(dest)
-    except Exception as exc:
-        if tmp.exists():
-            tmp.unlink()
-        print(f"[WARN] {dataset}: download failed ({exc})")
+    out = []
+    for obj_name in wanted:
+        dest = cache_dir / Path(obj_name).name
+        if not dest.exists():
+            obj_url = f"https://storage.googleapis.com/{GCS_BUCKET}/{urllib.parse.quote(obj_name)}"
+            print(f"[GET]  {dataset}: downloading gs://{GCS_BUCKET}/{obj_name} -> {dest}")
+            tmp = dest.with_suffix(dest.suffix + ".part")
+            try:
+                urllib.request.urlretrieve(obj_url, tmp)
+                tmp.replace(dest)
+            except Exception as exc:
+                if tmp.exists():
+                    tmp.unlink()
+                print(f"[WARN] {dataset}: download failed ({exc})")
+                continue
+        out.append(dest)
+    return out
+
+
+def _ensure_de(dataset: str, methods=("t-test", "MWU"), cache_dir: Path = DE_CACHE,
+               de_prefix: str = GCS_DE_PREFIX, local_dirs=None):
+    """Return ``{method: local path}`` covering every method, downloading what is missing.
+
+    Local exports (in ``local_dirs``, default ``cache_dir`` + ``de_outputs/``) are reused first;
+    whatever they do not cover is fetched from the public bucket into ``cache_dir``. Returns
+    ``None`` if some method is available neither locally nor in the bucket.
+
+    ``de_prefix`` selects the bucket folder (``de_outputs`` for the standard t-test,
+    ``de_outputs_overestim`` for the overestim-variant DE); pair it with a dedicated
+    ``cache_dir``/``local_dirs`` so the two never collide (same file-naming scheme).
+    """
+    search = list(local_dirs) if local_dirs is not None else [Path(cache_dir), DE_DIR]
+    found = _local_de(dataset, methods, search)
+    missing = [m for m in methods if m not in found]
+    if missing:
+        for path in _download_de(dataset, missing, cache_dir, de_prefix):
+            for m in _h5_methods(path) & set(missing):
+                found.setdefault(m, path)
+        missing = [m for m in methods if m not in found]
+    if missing:
+        print(f"[INFO] {dataset}: no DE for {', '.join(missing)} "
+              f"(local exports or gs://{GCS_BUCKET}/{de_prefix}/)")
         return None
-    return dest
+    return found
 
 # 12 DEG-calling criteria: t-test |t| / padj, then MWU |delta| / padj.
 TTEST_STAT_THR = [2.0, 4.0, 8.0]
@@ -340,34 +404,49 @@ def plot_figure(results, labels, out_path, suptitle=SUPTITLE):
 # scPertEval DE source + render/main
 # --------------------------------------------------------------------------- #
 
-class DESource:
-    """Reads a ``scperteval de`` HDF5 file, yielding the {ttest,mwu}_{stat,padj} arrays per pert.
+def _read_de(path, method):
+    """``(genes, perturbations, statistic, pvalue_adj)`` for one method group of a DE export."""
+    with h5py.File(str(path), "r") as f:
+        return ([g.decode() for g in f["genes"][:]],
+                [p.decode() for p in f["perturbations"][:]],
+                f[f"{method}/statistic"][:], f[f"{method}/pvalue_adj"][:])
 
-    ``ttest_key`` selects which t-test group to read for the "ttest" channel:
-    ``t-test`` (default) or ``t-test_overestim_var`` for the overestim variant. The MWU
-    channel always reads the ``MWU`` group.
+
+class DESource:
+    """Reads ``scperteval de`` exports, yielding the {ttest,mwu}_{stat,padj} arrays per pert.
+
+    ``sources`` is the ``{method: path}`` map from :func:`_ensure_de`: with scPertEval 0.1.0 the
+    two methods come from two files, while a pre-0.1 export holds both (then both keys point at
+    the same path). ``ttest_key`` selects which t-test group feeds the "ttest" channel --
+    ``t-test`` (default) or ``t-test_overestim_var`` for the overestim variant; the other channel
+    always reads ``MWU``. Two separate exports must agree on genes, and only the perturbations
+    they share are kept (in the t-test export's order).
     """
 
-    def __init__(self, h5path, dataset: str, ttest_key: str = "t-test"):
+    def __init__(self, sources: dict, dataset: str, ttest_key: str = "t-test"):
         self.dataset_name = dataset
         self.reference = "all_perturbed_8192"
-        with h5py.File(str(h5path), "r") as f:
-            self.perturbations = [p.decode() for p in f["perturbations"][:]]
-            self._ts, self._tp = f[f"{ttest_key}/statistic"][:], f[f"{ttest_key}/pvalue_adj"][:]
-            self._ms, self._mp = f["MWU/statistic"][:], f["MWU/pvalue_adj"][:]
-        self._idx = {p: i for i, p in enumerate(self.perturbations)}
+        t_genes, perts, self._ts, self._tp = _read_de(sources[ttest_key], ttest_key)
+        m_genes, m_perts, self._ms, self._mp = _read_de(sources["MWU"], "MWU")
+        if t_genes != m_genes:
+            raise ValueError(f"{dataset}: the {ttest_key} and MWU exports cover different genes "
+                             f"({len(t_genes)} vs {len(m_genes)}) -- recompute both from one dataset")
+        if perts != m_perts:
+            m_idx = {p: i for i, p in enumerate(m_perts)}
+            keep = [(i, m_idx[p]) for i, p in enumerate(perts) if p in m_idx]
+            ti, mi = [i for i, _ in keep], [j for _, j in keep]
+            print(f"[INFO] {dataset}: {ttest_key} and MWU exports differ in perturbations; "
+                  f"keeping the {len(keep)} they share")
+            perts = [perts[i] for i in ti]
+            self._ts, self._tp = self._ts[ti], self._tp[ti]
+            self._ms, self._mp = self._ms[mi], self._mp[mi]
+        self.perturbations = perts
+        self._idx = {p: i for i, p in enumerate(perts)}
 
     def read_perturbation(self, pert):
         i = self._idx[pert]
         return {"ttest_stat": self._ts[i], "ttest_padj": self._tp[i],
                 "mwu_stat": self._ms[i], "mwu_padj": self._mp[i]}
-
-
-def latest_de(ds: str):
-    """Local-only lookup (legacy). Standalone runs use ``_ensure_de`` instead."""
-    cands = sorted(glob.glob(str(DE_CACHE / f"{ds}*__de.h5")))
-    cands += sorted(glob.glob(str(DE_DIR / f"{ds}*__de.h5")))
-    return cands[-1] if cands else None
 
 
 def render(ttest_key="t-test", de_prefix=GCS_DE_PREFIX, cache_dir=DE_CACHE,
@@ -384,18 +463,20 @@ def render(ttest_key="t-test", de_prefix=GCS_DE_PREFIX, cache_dir=DE_CACHE,
     labels = [c[0] for c in criteria]
     results = []
     for ds in DATASETS:
-        h5 = _ensure_de(ds, cache_dir=cache_dir, de_prefix=de_prefix, local_dirs=local_dirs)
-        if h5 is None:
+        sources = _ensure_de(ds, (ttest_key, "MWU"), cache_dir=cache_dir,
+                             de_prefix=de_prefix, local_dirs=local_dirs)
+        if sources is None:
             print(f"[SKIP] {ds}: no DE available (local cache or public bucket)")
             continue
-        res = compute_dataset(DESource(h5, ds, ttest_key=ttest_key), criteria)
+        res = compute_dataset(DESource(sources, ds, ttest_key=ttest_key), criteria)
         if res["n_perturbations"] == 0:
             print(f"[SKIP] {ds}: no perturbations")
             continue
         results.append(res)
         print(f"[OK]   {ds}: n_pert={res['n_perturbations']}")
     if not results:
-        print("No datasets available; run `scperteval de` first.")
+        print(f"No datasets available; run `scperteval de <dataset>.h5ad --method {ttest_key}` "
+              "and `--method MWU` first.")
         return
     plot_figure(results, labels, FIG_DIR / f"{out_stem}.png", suptitle=suptitle)
     rows = [(r["dataset"], lab, int(round(sz)) if np.isfinite(sz) else "")

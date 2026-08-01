@@ -1,6 +1,7 @@
 """DRF table figure from scPertEval outputs, matching the DRF preprint figure's columns.
 
-Reads the latest per-dataset DRF CSV in ``drf_outputs/``, aggregates the
+Reads the latest per-dataset DRF CSV in ``drf_outputs/`` (as written by
+``scperteval calibrate --calibrator drf``), aggregates the
 per-perturbation DRF to mean and median per protocol, and renders a
 metric-row x dataset-column table (RdBu, signed 2-dp), one figure for each of mean
 and median. The descriptor columns mirror the preprint exactly: Base Metric,
@@ -70,9 +71,14 @@ DESC = ["Base\nMetric", "Reference\nCentering", "Representation", "Positive\nCon
         "Negative\nControl", "Feature\nSpace", "Weight\nExponent"]
 
 
-def latest_drf(ds: str):
-    cands = sorted(glob.glob(str(DRF_DIR / f"{ds}*__drf.csv")))
+def latest_table(stem: str):
+    """Newest ``drf_outputs/`` CSV matching ``stem`` (the filename timestamp orders the sort)."""
+    cands = sorted(glob.glob(str(DRF_DIR / f"{stem}.csv")))
     return cands[-1] if cands else None
+
+
+def latest_drf(ds: str):
+    return latest_table(f"{ds}*__drf")
 
 
 def aggregate() -> dict:
