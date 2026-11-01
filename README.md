@@ -19,8 +19,27 @@ Reproduction of the figures from the **scPertEval** preprint:
 The scPertEval code lives in a separate repo:
 <https://github.com/Virtual-Cell-Research-Community/scPertEval>.
 
-> **GCP is read-only here.** Every bucket access in this repo is download-only from public
-> buckets; nothing is ever written back to GCS.
+> **GCP is read-only here.** Every bucket access in this repo is download-only; nothing is ever
+> written back to GCS.
+
+## Downloading from the bucket
+
+The data is in the [Requester Pays](https://cloud.google.com/storage/docs/requester-pays) bucket
+`gs://scperteval`. Anyone can read it, but each download is billed to a Google Cloud project that
+you provide. Anonymous requests and plain `https://storage.googleapis.com/...` links don't work.
+
+You need a Google account, a Google Cloud project with billing enabled
+([create a project](https://cloud.google.com/resource-manager/docs/creating-managing-projects),
+[enable billing](https://cloud.google.com/billing/docs/how-to/modify-project)) and the
+[gcloud CLI](https://cloud.google.com/sdk/docs/install). Then:
+
+```bash
+gcloud auth login
+export SCPERTEVAL_BILLING_PROJECT=YOUR_PROJECT_ID
+```
+
+At [Google's rate](https://cloud.google.com/storage/pricing) of $0.12 per GiB to most destinations
+(November 2026), the 7 datasets cost about $2 and each set of 4 DE files about $0.14.
 
 ## (A) Reproduce everything — the notebook
 
@@ -28,8 +47,8 @@ Open and run `scperteval-publication-figures.ipynb` end-to-end. It:
 
 1. installs scPertEval from GitHub
    (`pip install "scperteval @ git+https://github.com/Virtual-Cell-Research-Community/scPertEval.git"`),
-2. downloads the 7 preprocessed datasets from the public bucket `gs://scperteval/processed`
-   (needs the gcloud SDK / `gsutil` on `PATH`),
+2. downloads the 7 preprocessed datasets from `gs://scperteval/processed`, billed to
+   `SCPERTEVAL_BILLING_PROJECT` (see [Downloading from the bucket](#downloading-from-the-bucket)),
 3. runs DRF for the 7 datasets and DE export for the 4 DEG datasets,
 4. renders all four figures and displays them.
 
@@ -38,17 +57,19 @@ Everything is deterministic (seed 42, 8192-cell subsample).
 
 ## (B) The two DEG figures, standalone
 
-Both DEG figures run on their own with **no notebook and no gcloud auth**:
+Both DEG figures run on their own with **no notebook**, once you've done the
+[setup above](#downloading-from-the-bucket):
 
 ```bash
 python deg_jaccard_figure.py
 python deg_concordance_figure.py
 ```
 
-Each script auto-downloads the per-gene DE HDF5s from the public bucket
-`gs://scperteval/de_outputs/` over plain HTTPS (the GCS JSON API for listing, a direct object
-URL for the download), caching them in `de_cache/`. No `gsutil`, no credentials. Outputs land
-in `figures/`. Datasets not yet present in the bucket are skipped gracefully.
+Each script auto-downloads the per-gene DE HDF5s from `gs://scperteval/de_outputs/` over HTTPS
+(the GCS JSON API for listing, a direct object URL for the download) using your gcloud credentials
+and billing project, caching them in `de_cache/`. Once they're cached, re-runs need no credentials
+and cost nothing. Outputs land in `figures/`. Datasets not yet present in the bucket are skipped
+gracefully.
 
 Requires Python with `h5py`, `numpy`, `pandas`, `scipy`, and `matplotlib` (all installed by the
 scPertEval install in the notebook path).
@@ -64,7 +85,7 @@ python deg_jaccard_overestim_figure.py        # -> figures/deg_jaccard_overestim
 python deg_concordance_overestim_figure.py    # -> figures/deg_concordance_overestim.png
 ```
 
-These auto-download the `t-test_overestim_var,MWU` DE HDF5s from the separate public folder
+These auto-download the `t-test_overestim_var,MWU` DE HDF5s from the separate folder
 `gs://scperteval/de_outputs_overestim/` (cached in `de_cache_overestim/`), so they never
 collide with the standard-t-test DE in `de_outputs/`. Criteria, heatmaps, and the count table
 are identical to the standard figures; only the t-test backend differs (its rows are tagged

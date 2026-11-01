@@ -2,11 +2,11 @@
 
 Identical to ``deg_concordance_figure.py`` but driven by the conservative-variance t-test
 backend. It reuses ``deg_concordance_figure.render()`` against the ``t-test_overestim_var`` DE
-in the public bucket ``gs://scperteval/de_outputs_overestim/`` (written by
+in the Requester Pays bucket ``gs://scperteval/de_outputs_overestim/`` (written by
 ``scperteval de --methods t-test_overestim_var,MWU``), cached separately in
 ``de_cache_overestim/`` so it never collides with the standard-t-test DE.
 
-    python deg_concordance_overestim_figure.py   # standalone: auto-downloads from the public bucket
+    python deg_concordance_overestim_figure.py   # standalone: auto-downloads from the bucket
 """
 from __future__ import annotations
 

@@ -6,11 +6,12 @@ perturbation Spearman histograms (top), 12x12 mean-Jaccard heatmaps (middle),
 and a median DEG set-size table (bottom). All criteria / Jaccard / plotting code
 is vendored here -- no external project dependency.
 
-    python deg_jaccard_figure.py        # standalone: auto-downloads DE from the public bucket
+    python deg_jaccard_figure.py        # standalone: auto-downloads DE from the bucket
 
-Standalone usage requires no auth: ``_ensure_de`` lists/downloads the per-dataset DE
-HDF5s from the public bucket ``gs://scperteval/de_outputs/`` over plain HTTPS and caches
-them in ``de_cache/`` next to this script.
+Standalone usage needs the gcloud CLI (signed in) and a Google Cloud project with billing
+enabled, named in ``SCPERTEVAL_BILLING_PROJECT``: ``_ensure_de`` lists/downloads the
+per-dataset DE HDF5s from the Requester Pays bucket ``gs://scperteval/de_outputs/`` over
+HTTPS, billed to that project, and caches them in ``de_cache/`` next to this script.
 
 ``render()`` is parameterised by the t-test backend, so the companion
 ``deg_jaccard_overestim_figure.py`` reuses everything here against the
@@ -20,6 +21,10 @@ from __future__ import annotations
 
 import glob
 import json
+import os
+import shutil
+import subprocess
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -33,23 +38,56 @@ DE_DIR = ROOT / "de_outputs"
 DE_CACHE = ROOT / "de_cache"
 FIG_DIR = ROOT / "figures"
 
-# Public GCS bucket holding the precomputed per-gene DE HDF5s (read-only, no auth).
+# Requester Pays GCS bucket holding the precomputed per-gene DE HDF5s (read-only). Downloads
+# are billed to the Google Cloud project named in BILLING_PROJECT_ENV.
 GCS_BUCKET = "scperteval"
 GCS_DE_PREFIX = "de_outputs"
+BILLING_PROJECT_ENV = "SCPERTEVAL_BILLING_PROJECT"
 
 DATASETS = ["wessels23", "replogle22k562", "nadig25hepg2", "arch1"]
 
 
 # --------------------------------------------------------------------------- #
-# Public-bucket DE loader (no gcloud / no auth)
+# Requester Pays DE loader (gcloud credentials + a billing project)
 # --------------------------------------------------------------------------- #
+
+def _gcs_headers() -> dict:
+    """Return auth headers for the Requester Pays bucket, or exit with setup help."""
+    project = os.environ.get(BILLING_PROJECT_ENV)
+    if not project:
+        raise SystemExit(
+            "Downloading DE needs a Google Cloud project with billing enabled, which pays for "
+            f"the download. Set {BILLING_PROJECT_ENV}=YOUR_PROJECT_ID and try again."
+        )
+    gcloud = shutil.which("gcloud")
+    if gcloud is None:
+        raise SystemExit(
+            "Downloading DE needs the gcloud CLI: https://cloud.google.com/sdk/docs/install"
+        )
+    token = subprocess.run([gcloud, "auth", "print-access-token"], capture_output=True, text=True)
+    if token.returncode != 0:
+        raise SystemExit(f"gcloud has no credentials; run `gcloud auth login`.\n{token.stderr}")
+    return {"Authorization": f"Bearer {token.stdout.strip()}", "x-goog-user-project": project}
+
+
+def _gcs_open(url: str):
+    """Open a bucket URL, exiting with Google's message on access or billing errors."""
+    request = urllib.request.Request(url, headers=_gcs_headers())
+    try:
+        return urllib.request.urlopen(request, timeout=60)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (400, 401, 403):
+            detail = exc.read().decode(errors="replace")[:500]
+            raise SystemExit(f"Cloud Storage refused the request (HTTP {exc.code}): {detail}") from exc
+        raise
+
 
 def _ensure_de(dataset: str, cache_dir: Path = DE_CACHE,
                de_prefix: str = GCS_DE_PREFIX, local_dirs=None):
     """Return a local path to ``<dataset>*__de.h5``, downloading it if needed.
 
     If a matching file is already cached locally (in ``local_dirs``, default
-    ``cache_dir`` + the legacy ``de_outputs/`` dir), reuse it. Otherwise list the public
+    ``cache_dir`` + the legacy ``de_outputs/`` dir), reuse it. Otherwise list the
     bucket under ``de_prefix`` via the GCS JSON API, find the ``*__de.h5`` object for
     ``dataset``, and download it over HTTPS. Returns ``None`` if the dataset is absent.
 
@@ -65,16 +103,16 @@ def _ensure_de(dataset: str, cache_dir: Path = DE_CACHE,
         if hits:
             return Path(hits[-1])
 
-    # 2. list the public bucket for this dataset's DE object
+    # 2. list the bucket for this dataset's DE object
     list_url = (
         f"https://storage.googleapis.com/storage/v1/b/{GCS_BUCKET}/o"
         f"?prefix={urllib.parse.quote(f'{de_prefix}/{dataset}')}"
     )
     try:
-        with urllib.request.urlopen(list_url, timeout=60) as resp:
+        with _gcs_open(list_url) as resp:
             listing = json.load(resp)
     except Exception as exc:  # network / API failure
-        print(f"[WARN] {dataset}: could not list public bucket ({exc})")
+        print(f"[WARN] {dataset}: could not list bucket ({exc})")
         return None
     names = [o["name"] for o in listing.get("items", []) if o["name"].endswith("__de.h5")]
     if not names:
@@ -89,7 +127,8 @@ def _ensure_de(dataset: str, cache_dir: Path = DE_CACHE,
     print(f"[GET]  {dataset}: downloading gs://{GCS_BUCKET}/{obj_name} -> {dest}")
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
-        urllib.request.urlretrieve(obj_url, tmp)
+        with _gcs_open(obj_url) as resp, open(tmp, "wb") as out:
+            shutil.copyfileobj(resp, out)
         tmp.replace(dest)
     except Exception as exc:
         if tmp.exists():
@@ -386,7 +425,7 @@ def render(ttest_key="t-test", de_prefix=GCS_DE_PREFIX, cache_dir=DE_CACHE,
     for ds in DATASETS:
         h5 = _ensure_de(ds, cache_dir=cache_dir, de_prefix=de_prefix, local_dirs=local_dirs)
         if h5 is None:
-            print(f"[SKIP] {ds}: no DE available (local cache or public bucket)")
+            print(f"[SKIP] {ds}: no DE available (local cache or bucket)")
             continue
         res = compute_dataset(DESource(h5, ds, ttest_key=ttest_key), criteria)
         if res["n_perturbations"] == 0:
