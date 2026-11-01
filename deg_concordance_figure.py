@@ -7,7 +7,7 @@ t-test and MWU top-k gene rankings. The 12x12 mean-Jaccard heatmaps (middle) and
 the median DEG count table (bottom) are reused verbatim by importing from
 ``deg_jaccard_figure``.
 
-    python deg_concordance_figure.py    # standalone: auto-downloads DE from the public bucket
+    python deg_concordance_figure.py    # standalone: auto-downloads DE from the bucket
 
 ``render()`` is parameterised by the t-test backend; ``deg_concordance_overestim_figure.py``
 reuses it against the ``t-test_overestim_var`` DE in ``gs://scperteval/de_outputs_overestim/``.
@@ -251,7 +251,7 @@ def render(ttest_key="t-test", de_prefix=GCS_DE_PREFIX, cache_dir=DE_CACHE,
     for ds in DATASETS:
         h5 = _ensure_de(ds, cache_dir=cache_dir, de_prefix=de_prefix, local_dirs=local_dirs)
         if h5 is None:
-            print(f"[SKIP] {ds}: no DE available (local cache or public bucket)")
+            print(f"[SKIP] {ds}: no DE available (local cache or bucket)")
             continue
         comp = DESource(h5, ds, ttest_key=ttest_key)
         res = compute_dataset(comp, criteria)
